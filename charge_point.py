@@ -92,6 +92,9 @@ class ChargePoint(cp):
     def __init__(self, id, connection, response_timeout=30):
         super().__init__(id, connection, response_timeout)
         self.charging_enabled = "OFF"
+        self.transaction_id = 1
+        self._next_transaction_id = 1
+        self._transaction_ids_by_connector: dict[int, int] = {}
         self._shutdown = False
         self._websocket_connected = False
         self._connection_announced = False
@@ -101,6 +104,15 @@ class ChargePoint(cp):
         self._pending_commands: set[asyncio.Task] = set()
         # Deduplication cache: maps command fingerprint -> last execution timestamp
         self._cmd_dedup: dict[str, float] = {}
+
+    def _allocate_transaction_id(self, connector_id: int | None = None) -> int:
+        """Return a unique transaction id for the station and keep a per-connector mapping."""
+        self._next_transaction_id += 1
+        tx_id = self._next_transaction_id
+        self.transaction_id = tx_id
+        if connector_id is not None:
+            self._transaction_ids_by_connector[connector_id] = tx_id
+        return tx_id
         
     @staticmethod
     def _utc_iso_datetime() -> str:
@@ -190,7 +202,9 @@ class ChargePoint(cp):
 
         return "OFF"
 
-    def get_transaction_id(self):
+    def get_transaction_id(self, connector_id: int | None = None):
+        if connector_id is not None:
+            return self._transaction_ids_by_connector.get(connector_id, self.transaction_id)
         return self.transaction_id
 
     def get_mqttpath(self):
@@ -279,9 +293,13 @@ class ChargePoint(cp):
     async def on_meter_values(self, **kwargs):
         logging.info('---> Meter values')
 
-        self.transaction_id = kwargs.get('transaction_id', self.transaction_id)        
+        connector_id = kwargs.get('connector_id')
+        tx_id = kwargs.get('transaction_id', self.transaction_id)
+        if connector_id is not None:
+            self._transaction_ids_by_connector[connector_id] = tx_id
+        self.transaction_id = tx_id
         await self.push_state_value_mqtt('transaction_id', self.transaction_id)
-        
+
         for i in kwargs['meter_value'][0]['sampled_value']:
             measure = (i['measurand']).replace('.','_').lower()
             value = i['value']
@@ -289,9 +307,9 @@ class ChargePoint(cp):
 
         for k,v in kwargs.items():
             logging.info("%s: %s", k, v)
-        
+
         return call_result.MeterValues()
-    
+
     @on(Action.start_transaction)
     async def on_start_transaction(self, connector_id: int, id_tag: str, meter_start: int, timestamp: str, **kwargs):
         logging.info('---> Start transaction')
@@ -304,13 +322,15 @@ class ChargePoint(cp):
             logging.info("%s: %s", k, v)
 
         auth_status = self._authorization_status_for_tag(id_tag)
+        transaction_id = self._allocate_transaction_id(connector_id)
 
         logging.info('---> Charging enabled : %s', self.is_charging_enabled())
         logging.info('---> Start transaction result : %s', auth_status)
+        logging.info('---> Assigned transaction id for connector %s: %s', connector_id, transaction_id)
 
         return call_result.StartTransaction(
             id_tag_info={'status': auth_status},
-            transaction_id=self.get_transaction_id()
+            transaction_id=transaction_id
         )
 
     @on(Action.status_notification)

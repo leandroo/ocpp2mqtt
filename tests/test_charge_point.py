@@ -474,6 +474,20 @@ def test_get_transaction_id(charge_point):
     assert charge_point.get_transaction_id() == 42
 
 
+@pytest.mark.asyncio
+async def test_on_start_transaction_uses_unique_ids_per_connector(monkeypatch, charge_point_with_mqtt, sample_start_transaction):
+    """Each connector should receive a distinct transaction id even on the same station."""
+    monkeypatch.setattr(cp_module, "AUTHORIZED_TAG_ID_LIST", ["test-tag"])
+    charge_point_with_mqtt.charging_enabled = "ON"
+
+    result_1 = await charge_point_with_mqtt.on_start_transaction(**{**sample_start_transaction, "connector_id": 1})
+    result_2 = await charge_point_with_mqtt.on_start_transaction(**{**sample_start_transaction, "connector_id": 2})
+
+    assert result_1.transaction_id != result_2.transaction_id
+    assert charge_point_with_mqtt.get_transaction_id(1) == result_1.transaction_id
+    assert charge_point_with_mqtt.get_transaction_id(2) == result_2.transaction_id
+
+
 def test_get_mqttpath_without_station_name(monkeypatch, charge_point):
     """Test get_mqttpath returns base path when MQTT_USESTATIONNAME is not set."""
     monkeypatch.setattr(cp_module, "MQTT_USESTATIONNAME", None)
