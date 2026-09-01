@@ -295,6 +295,8 @@ async def test_on_boot_notification(charge_point_with_mqtt, sample_boot_notifica
     
     assert result.status == RegistrationStatus.accepted
     assert result.interval == 10
+    assert result.current_time.endswith("Z")
+    assert "T" in result.current_time
 
 
 @pytest.mark.asyncio
@@ -319,6 +321,7 @@ async def test_on_heartbeat(charge_point_with_mqtt):
     
     assert result.current_time is not None
     assert 'T' in result.current_time  # ISO format
+    assert result.current_time.endswith('Z')
 
 
 @pytest.mark.asyncio

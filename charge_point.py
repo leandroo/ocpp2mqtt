@@ -6,7 +6,7 @@ import json as JSON
 import mqtt_2_charge_point 
 
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timezone
 from aiomqtt import Client
 from aiomqtt import MqttError
 from websockets.protocol import State
@@ -102,6 +102,11 @@ class ChargePoint(cp):
         # Deduplication cache: maps command fingerprint -> last execution timestamp
         self._cmd_dedup: dict[str, float] = {}
         
+    @staticmethod
+    def _utc_iso_datetime() -> str:
+        """Return an OCPP-compatible RFC3339 UTC timestamp."""
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     def _mqtt_identifier(self):
         base_identifier = MQTT_CLIENT_ID or f"ocpp2mqtt-{self.id}"
         sanitized = re.sub(r"[^A-Za-z0-9_-]", "-", base_identifier)
@@ -234,7 +239,7 @@ class ChargePoint(cp):
 
                
         return call_result.BootNotification(
-            current_time=datetime.utcnow().isoformat(),
+            current_time=self._utc_iso_datetime(),
             interval=10,
             status=RegistrationStatus.accepted,
         )
@@ -261,9 +266,9 @@ class ChargePoint(cp):
     async def on_heartbeat(self):
         logging.info("---> Heartbeat ")
         await self.push_state_value_mqtt('heartbeat', 'ON')
-        await self.push_state_value_mqtt('last_seen', datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S") + "Z")
+        await self.push_state_value_mqtt('last_seen', self._utc_iso_datetime())
             
-        return call_result.Heartbeat(current_time=datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S") + "Z")
+        return call_result.Heartbeat(current_time=self._utc_iso_datetime())
     
     @on(Action.meter_values)
     async def on_meter_values(self, **kwargs):
@@ -310,8 +315,8 @@ class ChargePoint(cp):
         await self.push_state_value_mqtt('status', status)
         await self.push_state_value_mqtt('connector_id', connector_id)
         await self.push_state_value_mqtt('connection_state', 'CONNECTED')
-        await self.push_state_value_mqtt('last_status_change', datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S") + "Z")
-        await self.push_state_value_mqtt('last_seen', datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S") + "Z")
+        await self.push_state_value_mqtt('last_status_change', self._utc_iso_datetime())
+        await self.push_state_value_mqtt('last_seen', self._utc_iso_datetime())
         await self.push_state_values_mqtt(**kwargs)
 
         if status != "Charging":
@@ -396,7 +401,7 @@ class ChargePoint(cp):
         # Only publish disconnection if we had announced a connection
         if was_connected or self._connection_announced:
             await self.push_state_value_mqtt('connection_state', 'DISCONNECTED')
-            await self.push_state_value_mqtt('last_disconnected', datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S") + "Z")
+            await self.push_state_value_mqtt('last_disconnected', self._utc_iso_datetime())
             await self.push_state_value_mqtt('disconnect_reason', reason)
             # Reset power values on disconnect
             await self.push_state_value_mqtt('power_active_import', 0)
@@ -431,7 +436,7 @@ class ChargePoint(cp):
                         await self.push_state_value_mqtt('connection_state', 'CONNECTED')
                         await self.push_state_value_mqtt(
                             'last_connected',
-                            datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S") + "Z",
+                            self._utc_iso_datetime(),
                         )
 
                     # Track when we (re)connected so we can ignore retained
