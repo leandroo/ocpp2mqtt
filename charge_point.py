@@ -202,7 +202,12 @@ class ChargePoint(cp):
     #Received events from the charge point
 
     def _authorization_status_for_tag(self, id_tag: str):
-        accepted_tag = (id_tag in AUTHORIZED_TAG_ID_LIST)
+        # Check if wildcard is configured to accept any tag
+        if "*" in AUTHORIZED_TAG_ID_LIST:
+            accepted_tag = True
+        else:
+            accepted_tag = (id_tag in AUTHORIZED_TAG_ID_LIST)
+        
         if accepted_tag and self.is_charging_enabled():
             self.authorized_tag_id = id_tag
             return AuthorizationStatus.accepted
